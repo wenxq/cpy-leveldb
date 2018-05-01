@@ -1,4 +1,7 @@
 # cpy-leveldb #
+
+    this fork: support unicode parameter for Put/Get and so on
+
 Python bindings for LevelDB using leveldb c api
 (http://code.google.com/p/leveldb/)
 author: Fu Haiping (haipingf@gmail.com)
