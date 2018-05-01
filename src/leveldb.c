@@ -22,6 +22,32 @@
 
 #include "leveldb.h"
 
+static void Decode2UTF8(PyObject* input, PyObject** utf8, const char** ptr, size_t* size)
+{
+    if (PyUnicode_Check(input))
+    {   
+        *utf8 = PyUnicode_AsUTF8String(input);
+        if (*utf8 == NULL)
+        {   
+            PyErr_SetString(PyExc_ValueError, "Bad string parameter.");
+        }
+        else
+        {
+            *ptr = PyString_AsString(*utf8);
+            *size = PyString_Size(*utf8);
+        }
+    }
+    else if (PyString_Check(input))
+    {   
+        *ptr = PyString_AsString(input);
+        *size = PyString_Size(input);
+    }
+    else
+    {
+        PyErr_SetString(PyExc_ValueError, "Bad string parameter.");
+    }
+}
+
 static void LevelDB_dealloc(LevelDB* self)
 {
 	Py_BEGIN_ALLOW_THREADS
@@ -190,12 +216,15 @@ static PyObject* LevelDB_Put(LevelDB* self, PyObject* args, PyObject* kwds)
 	char *err = NULL;
 	leveldb_writeoptions_t *woptions = NULL;
 
-	LEVELDB_DEFINE_KVBUF(key);
-	LEVELDB_DEFINE_KVBUF(value);
+	LEVELDB_DEFINE_KVBUF(key);	
+	LEVELDB_DEFINE_KVBUF(value);	
 
-
-	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"s#s#|O!", \
-				(char**)kwargs, &s_key, &i_key, &s_value, &i_value, &PyBool_Type, &sync)) {
+    PyObject* key = NULL;
+    PyObject* value = NULL;
+    PyObject* key_uni = NULL;
+    PyObject* val_uni = NULL;
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"OO|O!", \
+				(char**)kwargs, &key, &value, &PyBool_Type, &sync)) {
 		return NULL;
 	}
 
@@ -207,9 +236,15 @@ static PyObject* LevelDB_Put(LevelDB* self, PyObject* args, PyObject* kwds)
 
 	Py_BEGIN_ALLOW_THREADS
 
+    Decode2UTF8(key, &key_uni, &s_key, &i_key);
+    Decode2UTF8(value, &val_uni, &s_value, &i_value);
+
 	leveldb_writeoptions_set_sync(woptions, (sync == Py_True) ? 1 : 0);
 	leveldb_put(self->_db, woptions, (const char *)s_key, (size_t)i_key, \
 			(const char *)s_value, (size_t)i_value, &err);
+
+    Py_XDECREF(key_uni);
+    Py_XDECREF(val_uni);
 
 	Py_END_ALLOW_THREADS
 
@@ -237,10 +272,14 @@ static PyObject* LevelDB_Get(LevelDB* self, PyObject* args, PyObject* kwds)
 
 	LEVELDB_DEFINE_KVBUF(key);
 
-	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"s#|O!O!", \
-				(char**)kwargs, &s_key, &i_key, &PyBool_Type, &verify_checksums, \
+    PyObject* key = NULL;
+    PyObject* key_uni = NULL;
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"O|O!O!", \
+				(char**)kwargs, &key, &PyBool_Type, &verify_checksums, \
 				&PyBool_Type, &fill_cache))
+    {
 		return NULL;
+    }
 
 	Py_BEGIN_ALLOW_THREADS
 
@@ -250,9 +289,11 @@ static PyObject* LevelDB_Get(LevelDB* self, PyObject* args, PyObject* kwds)
 	 *
 	 * */
 
+    Decode2UTF8(key, &key_uni, &s_key, &i_key);
 	leveldb_readoptions_set_verify_checksums(self->_roptions, (verify_checksums == Py_True) ? 1 : 0);
 	leveldb_readoptions_set_fill_cache(self->_roptions, (fill_cache == Py_True) ? 1 : 0);
 	value = leveldb_get(self->_db, self->_roptions, (const char *)s_key, (size_t)i_key, &value_len, &err);
+    Py_XDECREF(key_uni);
 
 	/* reset readoptions _roptions to default */
 	leveldb_readoptions_set_verify_checksums(self->_roptions, 0);
@@ -266,6 +307,11 @@ static PyObject* LevelDB_Get(LevelDB* self, PyObject* args, PyObject* kwds)
 		return NULL;
 	}
 
+    if (value_len == 0)
+    {
+        Py_INCREF(Py_None);
+        return Py_None;
+    }
 	return PyString_FromStringAndSize(value, value_len);
 }
 
@@ -277,9 +323,11 @@ static PyObject* LevelDB_Delete(LevelDB* self, PyObject* args, PyObject* kwds)
 
 	LEVELDB_DEFINE_KVBUF(key);	
 
+    PyObject* key = NULL;
+    PyObject* key_uni = NULL;
 	char *err = NULL;
-	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"s#|O!", (char**)kwargs, \
-				&s_key, &i_key, &PyBool_Type, &sync))
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"O|O!", (char**)kwargs, \
+				&key, &PyBool_Type, &sync))
 		return NULL;
 	
 	woptions = leveldb_writeoptions_create();
@@ -291,10 +339,11 @@ static PyObject* LevelDB_Delete(LevelDB* self, PyObject* args, PyObject* kwds)
 
 	Py_BEGIN_ALLOW_THREADS
 
+    Decode2UTF8(key, &key_uni, &s_key, &i_key);
 	leveldb_delete(self->_db, woptions, (const char *)s_key, (size_t)i_key, &err);
+    Py_XDECREF(key_uni);
 
 	Py_END_ALLOW_THREADS
-
 
 	if (err != NULL) {
 		PyErr_Format(LevelDBError, "error occurs when delete:\n\t%s\n", err);
@@ -338,7 +387,6 @@ static PyObject * LevelDB_Write(LevelDB *self, PyObject *args, PyObject *kwds)
 	Py_INCREF(Py_None);
 	return Py_None;
 }
-
 
 static PyObject * LevelDB_Close(LevelDB *self, PyObject *args)
 {
@@ -482,9 +530,12 @@ static PyObject *LevelDB_RepairDB(LevelDB* self, PyObject* args, PyObject* kwds)
 
 static PyObject* LevelDB_RangeIter(LevelDB* self, PyObject* args, PyObject* kwds)
 {
-
 	LEVELDB_DEFINE_KVBUF(key_from);
 	LEVELDB_DEFINE_KVBUF(key_to);
+    PyObject* key_f = NULL;
+    PyObject* key_t = NULL;
+    PyObject* key_funi = NULL;
+    PyObject* key_tuni = NULL;
 
 	PyObject* verify_checksums = Py_False;
 	PyObject* fill_cache = Py_True;
@@ -492,11 +543,9 @@ static PyObject* LevelDB_RangeIter(LevelDB* self, PyObject* args, PyObject* kwds
 	const char* kwargs[] = {"key_from", "key_to", "verify_checksums", "fill_cache", "include_value", 0};
 
     VERBOSE("%s", "Entering LevelDB_RangeIter...");
-	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"|t#t#O!O!O!", (char**)kwargs, &s_key_from, &i_key_from, &s_key_to, &i_key_to, &PyBool_Type, &verify_checksums, &PyBool_Type, &fill_cache, &PyBool_Type, &include_value))
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"|OOO!O!O!",
+        (char**)kwargs, &key_f, &key_t, &PyBool_Type, &verify_checksums, &PyBool_Type, &fill_cache, &PyBool_Type, &include_value))
 		return 0;
-
-	char *from;
-	char *to;
 
     leveldb_readoptions_t *roptions;
     roptions = leveldb_readoptions_create();
@@ -505,18 +554,8 @@ static PyObject* LevelDB_RangeIter(LevelDB* self, PyObject* args, PyObject* kwds
 	leveldb_readoptions_set_verify_checksums(roptions, ((verify_checksums == Py_True) ? 1 : 0));
 	leveldb_readoptions_set_fill_cache(roptions, ((fill_cache == Py_True) ? 1 : 0));
 
-
-	int is_from = (s_key_from != NULL);
-	int is_to = (s_key_to != NULL);
-
-	if (is_from) {
-		from = (char *) malloc(sizeof(char) * i_key_from);
-        strncpy(from, s_key_from, i_key_from);
-    }
-	if (is_to) {
-		to = (char *) malloc(sizeof(char) * i_key_to);
-        strncpy(to, s_key_to, i_key_to);
-    }
+	int is_from = (key_f != NULL);
+	int is_to = (key_t != NULL);
 
 	// create iterator
 	leveldb_iterator_t *iter = NULL;
@@ -530,7 +569,11 @@ static PyObject* LevelDB_RangeIter(LevelDB* self, PyObject* args, PyObject* kwds
 		if (!is_from)
             leveldb_iter_seek_to_first(iter);
 		else
+        {
+            Decode2UTF8(key_f, &key_funi, &s_key_from, &i_key_from);
             leveldb_iter_seek(iter, s_key_from, i_key_from);
+            Py_XDECREF(key_funi);
+        }
 	}
 
 	Py_END_ALLOW_THREADS
@@ -549,12 +592,14 @@ static PyObject* LevelDB_RangeIter(LevelDB* self, PyObject* args, PyObject* kwds
 
 	if (is_to) {
         s = (char *) malloc(sizeof(char) * i_key_to);
-        strncpy(s, s_key_to, i_key_to);
-
 		if (s == 0) {
 			_XDECREF(iter);
 			return PyErr_NoMemory();
 		}
+
+        Decode2UTF8(key_t, &key_tuni, &s_key_to, &i_key_to);
+        strncpy(s, s_key_to, i_key_to);
+        Py_XDECREF(key_tuni);
 	}
 
 	return RangeIterator_new(self, iter, s, (include_value == Py_True) ? 1 : 0);
@@ -568,16 +613,23 @@ static PyObject *LevelDB_CompactRange(LevelDB *self, PyObject *args, PyObject *k
 
 	LEVELDB_DEFINE_KVBUF(start_key);
 	LEVELDB_DEFINE_KVBUF(limit_key);
+    PyObject* key_s = NULL;
+    PyObject* key_l = NULL;
+    PyObject* key_suni = NULL;
+    PyObject* key_luni = NULL;
 
-
-	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"s#s#", \
-				(char**)kwargs, &s_start_key, &i_start_key, &s_limit_key, &i_limit_key)) {
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, (char*)"OO", \
+				(char**)kwargs, &key_s, &key_l)) {
 		return NULL;
 	}
 	Py_BEGIN_ALLOW_THREADS
 
+    Decode2UTF8(key_s, &key_suni, &s_start_key, &i_start_key);
+    Decode2UTF8(key_l, &key_luni, &s_limit_key, &i_limit_key);
 	leveldb_compact_range(self->_db, (const char *)s_start_key, (size_t)i_start_key, \
 			(const char *)s_limit_key, (size_t)i_limit_key);
+    Py_XDECREF(key_suni);
+    Py_XDECREF(key_luni);
 
 	Py_END_ALLOW_THREADS
 

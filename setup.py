@@ -8,7 +8,8 @@ from distutils.core import setup, Extension
 
 extra_compile_args = ['-Wall', '-pedantic', '-I./leveldb/include/',
 '-shared', '-std=gnu99', '-fPIC', '-g', '-D_GNU_SOURCE']
-extra_link_args = ['-L/usr/local/lib/', '-static', '-lleveldb', '-lsnappy', '-lpthread']
+#extra_link_args = ['-L/usr/local/lib/', '-static', '-lleveldb', '-lsnappy', '-lpthread']
+extra_link_args = ['-L/usr/local/lib/', '-lleveldb', '-lsnappy', '-lpthread']
 
 setup(
 	name = 'leveldb',
